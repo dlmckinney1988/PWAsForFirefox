@@ -1,0 +1,110 @@
+name: Extension CI/CD
+
+on:
+  push:
+    paths:
+      - .github/workflows/extension.yaml
+      - extension/**
+    tags:
+      - v*
+    branches-ignore:
+      - crowdin-*
+  pull_request:
+    paths:
+      - .github/workflows/extension.yaml
+      - extension/**
+
+defaults:
+  run:
+    working-directory: extension
+    shell: bash
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/yarn
+            ~/.config/yarn
+          key: ${{ runner.os }}-yarn-lint-${{ hashFiles('**/yarn.lock') }}
+          restore-keys: ${{ runner.os }}-yarn-
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: yarn install --frozen-lockfile
+
+      - name: Lint the extension
+        run: yarn lint
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/yarn
+            ~/.config/yarn
+          key: ${{ runner.os }}-yarn-build-${{ hashFiles('**/yarn.lock') }}
+          restore-keys: ${{ runner.os }}-yarn-
+
+      - name: Set the version
+        run: |
+          if [[ $GITHUB_REF == refs/tags/v* ]]
+          then
+            VERSION=${GITHUB_REF/refs\/tags\/v}
+            echo "VERSION=$VERSION" >> $GITHUB_ENV
+            sed -i "s/\"version\": \"0.0.0\"/\"version\": \"$VERSION\"/g" package.json
+            sed -i "s/\"version\": \"0.0.0\"/\"version\": \"$VERSION\"/g" src/manifest.json
+          else
+            echo "VERSION=0.0.0" >> $GITHUB_ENV
+          fi
+
+      - name: Package the extension source
+        run: 7z a "dist/firefoxpwa-${{ env.VERSION }}-source.zip" "." -bd  -mx9 -xr@"../.gitignore"
+
+      - name: Upload the extension source
+        uses: actions/upload-artifact@v4
+        with:
+          name: firefoxpwa-extension-source
+          path: extension/dist/firefoxpwa-${{ env.VERSION }}-source.zip
+          compression-level: 0
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: yarn install --frozen-lockfile
+
+      - name: Build the extension
+        run: yarn build
+
+      - name: Upload the compiled extension
+        uses: actions/upload-artifact@v4
+        with:
+          name: firefoxpwa-extension-compiled
+          path: extension/dist/firefoxpwa-*-compiled.zip
+          compression-level: 0
+
+  # Add auto-publishing to AMO once web-ext supports submitting extensions from ZIP files
+  # This also includes uploading source code and AMO release notes
+  # See: https://github.com/mozilla/web-ext/issues/3242
